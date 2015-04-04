@@ -53,9 +53,6 @@ autoMethods = [sturges, rice, scott, sturice]
 num_bins = [10, 50] + map(lambda method: method(x), autoMethods)
 bindesc = ["default", "manual"] + map(lambda method: method.__name__, autoMethods)
 
-print num_bins
-print bindesc
-
 plt.figure(tight_layout=True, figsize=(14,7))
 
 # exit()
