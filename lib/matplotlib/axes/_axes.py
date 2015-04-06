@@ -5429,7 +5429,7 @@ class Axes(_AxesBase):
     #### Data analysis
 
     @docstring.dedent_interpd
-    def hist(self, x, bins=10, range=None, normed=False, weights=None,
+    def hist(self, x, bins='default', range=None, normed=False, weights=None,
              cumulative=False, bottom=None, histtype='bar', align='mid',
              orientation='vertical', rwidth=None, log=False,
              color=None, label=None, stacked=False,
@@ -5727,9 +5727,117 @@ class Axes(_AxesBase):
         # get to the point of requiring numpy >= 1.5.
         hist_kwargs = dict(range=bin_range)
 
+
+
+        if is_string_like(bins):
+            # We've chosen a provided method:
+
+            # Automatically determine bins. Defined as functions here for easy refactoring
+            # Can easily be moved into relevant if functions
+            def minNdecorator(N):
+                """"
+                Decorate the estimators in case we need to provide a lower bound
+                The minimum value can be defined as so
+                @minNdecorator(10)
+                def func():
+                    ...
+                """
+                def decorator(func):
+                    def inner(*args, **kwargs):
+                        return max(func(*args, **kwargs), N)
+                    return inner
+                return decorator
+
+            def sturges(x):
+                """
+                Using Sturges estimator
+                Very simplistic based on logarithms, however
+                poorer performance for large datasets and non-normal data
+                """
+                return np.ceil(np.log2(x.size)) + 1
+
+            def rice(x):
+                """
+                A similar version of sturges with another simple estimator. Better performance for larger datasets
+                The number of bins is proportional to the cube root of data size
+                """
+                return np.ceil(2 * len(x) ** (1.0/3))
+
+
+            def SturgesRice(x, geom= True):
+                """
+                An average or the Rice and Sturges - works surprisingly well in practice
+                """
+                if geom:
+                    #geometric mean
+                    return np.ceil(np.sqrt(rice(x) * sturges(x)))
+                else:
+                    #arithmetic Mean
+                    return np.ceil((rice(x) + sturges(x))/2)
+
+            def scott(x):
+                """
+                The binwidth is proprtional to the standard deviation of the data and
+                inversely proportional to the cube root of data size
+
+                """
+                h = 3.5 * x.std() * x.size **(-1.0/3)
+                if h>0:
+                    return np.ceil(x.ptp()/h)
+                return 1
+
+            def mad(data, axis=None):
+                """
+                Mean Absolute Deviation - simple well defined function
+                Simplest implementation, even length case left to default behaviour
+                """
+                return np.median(np.absolute(data - np.median(data, axis)), axis)
+
+            def FD(x):
+                """
+                Freeman Diaconis rule using IQR for binwidth
+                Considered a variation of the Scott rule with more robustness as the Inter quartile range
+                is less affected by outliers than the standard deviation.
+
+                If the IQR is 0, we return the median absolute deviation as defined above, else 1
+                """
+                iqr = np.subtract(*np.percentile(x, [75, 25]))
+
+
+                if iqr ==0: #unlikely
+                    iqr = mad(x) # replace with something useful
+
+                h = (2 * iqr * x.size**(-1.0/3)) # binwidth
+
+                if iqr > 0:
+                    return np.ceil(x.ptp()/h)
+
+                return 1 #all else fails
+
+            def default(x):
+                """
+                FD tends to be to be more optimal for larger datasets, otherwise the sturges rice average provides
+                a good option instead
+                """
+                if x.size<1000:
+                    return SturgesRice(x)
+                else:
+                    return FD(x)
+
+            optimalityMethods = {'sturges': sturges, 'rice': rice, 'scott': scott,
+                                 'FD': FD, 'SturgesRice': SturgesRice, 'default': default}
+
+            try:
+                bins = optimalityMethods[bins]
+            except KeyError:
+                bins = default
+                print("String choice not found, reverting to default")
+                # better way to do this?
+
         n = []
         mlast = None
         for i in xrange(nx):
+            bins = bins(x[i]) # make the calculation for number of bins
             # this will automatically overwrite bins,
             # so that each histogram uses the same bins
             m, bins = np.histogram(x[i], bins, weights=w[i], **hist_kwargs)
